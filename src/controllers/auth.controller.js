@@ -1,5 +1,6 @@
 const userModel = require("../models/user.model");
 const jwt = require("jsonwebtoken");
+const emailService = require("../services/email.service");
 
 /**
  * - user register controller
@@ -41,6 +42,8 @@ const userRegisterController = async (req, res) => {
             message: "User registered successfully.",
             status: "success"
          });
+
+        await emailService.sendRegistrationEmail(user.email, user.name);
     }
     catch{
         console.error((err) => console.log(err));

@@ -47,6 +47,7 @@ async function sendRegistrationEmail(userEmail, name){
     await sendEmail(userEmail, subject, text, html);
 }
 
+
 module.exports = {
     sendRegistrationEmail
 };

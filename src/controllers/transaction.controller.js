@@ -186,6 +186,88 @@ async function createTransaction(req, res) {
 
 }
 
+async function createInitialFundsTransaction(req, res) {
+  const { toAccount, amount, idempotencyKey } = req.body;
+
+  if (!toAccount || !amount || !idempotencyKey) {
+    return res.status(400).json({
+      success: false,
+      message: "All fields are required for creating initial funds transaction.",
+      status: "failed",
+    });
+  }
+
+  const toUserAccount = await accountModel.findById({ _id: toAccount });
+
+  if(!toUserAccount){
+    return res.status(400).json({
+      success: false,
+      message: "Invalid account ID.",
+      status: "failed",
+    });
+  }
+
+  const fromUserAccount = await accountModel.findOne({ 
+    systemUser: true,
+    user: req.user._id 
+  });
+
+  if(!fromUserAccount){
+    return res.status(400).json({
+      success: false,
+      message: "System user account not found.",
+      status: "failed",
+    });
+  }
+
+  const session = await mongoose.startSession();
+  session.startTransaction();
+
+  const transaction = await transactionModel.create(
+    {
+      fromAccount: fromUserAccount._id,
+      toAccount: toAccount,
+      amount: amount,
+      idempotencyKey: idempotencyKey,
+      status: "PENDING",
+    },
+    { session },
+  );
+
+  const debitLedgerEntry = await ledgerModel.create(
+    {
+      account: fromUserAccount._id,
+      amount: amount,
+      transaction: transaction._id,
+      type: "DEBIT",
+    },
+    { session },
+  );
+
+  const creditLedgerEntry = await ledgerModel.create(
+    {
+      account: toAccount,
+      amount: amount,
+      transaction: transaction._id,
+      type: "CREDIT",
+    },
+    { session },
+  );
+
+  transaction.status = "COMPLETED";
+  await transaction.save({ session });
+
+  await session.commitTransaction();
+  session.endSession();
+
+  res.status(201).json({
+    success: true,
+    message: "Initial funds transaction completed successfully.",
+    status: "success",
+    transaction: transaction,
+  });
+}
 module.exports = {
-  createTransactionController,
+  createTransaction,
+  createInitialFundsTransaction
 };

@@ -172,7 +172,7 @@ async function createTransaction(req, res) {
    */
   await emailService.sendTransactionEmail(
     req.user.email,
-    re.user.name,
+    req.user.name,
     amount,
     toAccount
   );

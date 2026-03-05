@@ -117,55 +117,78 @@ async function createTransaction(req, res) {
     });
   }
 
-  /**
-   * 5. Create Transaction with PENDING status.
-   * 6. Create DEBIT ledger entry for sender.
-   * 7. Create CREDIT ledger entry for receiver.
-   * 8. Update Transaction status to COMPLETED.
-   * 9. Commit MongoDB session.
-   * We need to perform steps 5-9 in a MongoDB transaction to ensure atomicity and consistency of data.
-   * If any step fails, the entire transaction will be rolled back to maintain data integrity.
-   * This is crucial in a banking system to prevent issues like double spending or inconsistent account balances.
-   */
-  const session = await mongoose.startSession();
-  session.startTransaction();
+  let transaction;
+  try {
+    /**
+     * 5. Create Transaction with PENDING status.
+     * 6. Create DEBIT ledger entry for sender.
+     * 7. Create CREDIT ledger entry for receiver.
+     * 8. Update Transaction status to COMPLETED.
+     * 9. Commit MongoDB session.
+     * We need to perform steps 5-9 in a MongoDB transaction to ensure atomicity and consistency of data.
+     * If any step fails, the entire transaction will be rolled back to maintain data integrity.
+     * This is crucial in a banking system to prevent issues like double spending or inconsistent account balances.
+     */
+    const session = await mongoose.startSession();
+    session.startTransaction();
 
-  const transaction = await transactionModel.create(
-    {
-      fromAccount: fromAccount,
-      toAccount: toAccount,
-      amount: amount,
-      idempotencyKey: idempotencyKey,
-      status: "PENDING",
-    },
-    { session },
-  );
+     transaction = (
+      await transactionModel.create(
+        [
+          {
+            fromAccount: fromAccount,
+            toAccount: toAccount,
+            amount: amount,
+            idempotencyKey: idempotencyKey,
+            status: "PENDING",
+          },
+        ],
+        { session },
+      )
+    )[0];
 
-  const debitLedgerEntry = await ledgerModel.create(
-    {
-      account: fromAccount,
-      amount: amount,
-      transaction: transaction._id,
-      type: "DEBIT",
-    },
-    { session },
-  );
+    const debitLedgerEntry = await ledgerModel.create(
+      [
+        {
+          account: fromAccount,
+          amount: amount,
+          transaction: transaction._id,
+          type: "DEBIT",
+        },
+      ],
+      { session },
+    );
 
-  const creditLedgerEntry = await ledgerModel.create(
-    {
-      account: toAccount,
-      amount: amount,
-      transaction: transaction._id,
-      type: "CREDIT",
-    },
-    { session },
-  );
+    await (() => {
+      return new Promise((resolve) => setTimeout(resolve, 15 * 1000));
+    })();
 
-  transaction.status = "COMPLETED";
-  await transaction.save({ session });
+    const creditLedgerEntry = await ledgerModel.create(
+      [
+        {
+          account: toAccount,
+          amount: amount,
+          transaction: transaction._id,
+          type: "CREDIT",
+        },
+      ],
+      { session },
+    );
 
-  await session.commitTransaction();
-  session.endSession();
+    await transactionModel.findOneAndUpdate(
+      { _id: transaction._id },
+      { status: "COMPLETED" },
+      { session, new: true },
+    );
+    await session.commitTransaction();
+    session.endSession();
+  } catch (error) {
+    return res.status(400).json({
+      success: false,
+      message: "Transaction is pending due to some issue, please try again after some time.",
+      status: "failed",
+    });
+  }
 
   /**
    * 10. Send email notification.
@@ -174,7 +197,7 @@ async function createTransaction(req, res) {
     req.user.email,
     re.user.name,
     amount,
-    toAccount
+    toAccount,
   );
 
   res.status(201).json({
@@ -183,7 +206,6 @@ async function createTransaction(req, res) {
     status: "success",
     transaction: transaction,
   });
-
 }
 
 async function createInitialFundsTransaction(req, res) {
@@ -192,14 +214,15 @@ async function createInitialFundsTransaction(req, res) {
   if (!toAccount || !amount || !idempotencyKey) {
     return res.status(400).json({
       success: false,
-      message: "All fields are required for creating initial funds transaction.",
+      message:
+        "All fields are required for creating initial funds transaction.",
       status: "failed",
     });
   }
 
   const toUserAccount = await accountModel.findById({ _id: toAccount });
 
-  if(!toUserAccount){
+  if (!toUserAccount) {
     return res.status(400).json({
       success: false,
       message: "Invalid account ID.",
@@ -207,12 +230,12 @@ async function createInitialFundsTransaction(req, res) {
     });
   }
 
-  const fromUserAccount = await accountModel.findOne({ 
+  const fromUserAccount = await accountModel.findOne({
     systemUser: true,
-    user: req.user._id 
+    user: req.user._id,
   });
 
-  if(!fromUserAccount){
+  if (!fromUserAccount) {
     return res.status(400).json({
       success: false,
       message: "System user account not found.",
@@ -269,5 +292,5 @@ async function createInitialFundsTransaction(req, res) {
 }
 module.exports = {
   createTransaction,
-  createInitialFundsTransaction
+  createInitialFundsTransaction,
 };

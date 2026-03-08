@@ -1,5 +1,6 @@
 const express = require('express');
 const authController = require('../controllers/auth.controller');
+const { authMiddleware } = require('../middleware/auth.middleware');
 const router = express.Router();
 
 // post. /api/auth/register
@@ -13,5 +14,5 @@ router.post("/login", authController.userLoginController);
  * - Logout the user by blacklisting the token
  * - Protected Route
  */
-router.post("/logout", authController.authMiddleware, authController.userLogoutController);
+router.post("/logout", authMiddleware, authController.userLogoutController);
 module.exports = router;

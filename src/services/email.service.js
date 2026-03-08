@@ -1,17 +1,10 @@
 require('dotenv').config();
 const nodemailer = require('nodemailer');
 
-// Build transporter based on available credentials
+// App Password preferred (no expired tokens). OAuth2 tokens often expire/revoke.
 function createTransporter() {
   const hasAppPassword = process.env.EMAIL_USER && process.env.EMAIL_APP_PASSWORD;
-  const hasOAuth2 =
-    process.env.EMAIL_USER &&
-    process.env.CLIENT_ID &&
-    process.env.CLIENT_SECRET &&
-    process.env.REFRESH_TOKEN;
-
   if (hasAppPassword) {
-    // Gmail with App Password (simplest - enable 2FA, create App Password in Google Account)
     return nodemailer.createTransport({
       service: 'gmail',
       auth: {
@@ -20,20 +13,6 @@ function createTransporter() {
       },
     });
   }
-  if (hasOAuth2) {
-    // Gmail OAuth2
-    return nodemailer.createTransport({
-      service: 'gmail',
-      auth: {
-        type: 'OAuth2',
-        user: process.env.EMAIL_USER,
-        clientId: process.env.CLIENT_ID,
-        clientSecret: process.env.CLIENT_SECRET,
-        refreshToken: process.env.REFRESH_TOKEN,
-      },
-    });
-  }
-  // Fallback: Ethereal test account for development
   return null;
 }
 
@@ -41,51 +20,32 @@ let transporter = createTransporter();
 let etherealUser = null;
 
 async function getTransporter() {
-  if (transporter) {
-    return transporter;
-  }
+  if (transporter) return transporter;
   const testAccount = await nodemailer.createTestAccount();
   etherealUser = testAccount.user;
   transporter = nodemailer.createTransport({
     host: 'smtp.ethereal.email',
     port: 587,
     secure: false,
-    auth: {
-      user: testAccount.user,
-      pass: testAccount.pass,
-    },
+    auth: { user: testAccount.user, pass: testAccount.pass },
   });
-  console.log(
-    'Email: Using Ethereal (dev mode). Add EMAIL_USER + EMAIL_APP_PASSWORD to .env for real emails.'
-  );
+  console.log('Email: Using Ethereal (dev). Add EMAIL_USER + EMAIL_APP_PASSWORD for real emails.');
   return transporter;
 }
 
-// Verify connection on startup
 (async () => {
   const trans = await getTransporter();
-  trans.verify((error, success) => {
-    if (error) {
-      console.error('Error connecting to email server:', error.message);
-    } else {
-      console.log('Email server is ready to send messages');
-    }
+  trans.verify((error) => {
+    if (error) console.error('Error connecting to email server:', error.message);
+    else console.log('Email server is ready to send messages');
   });
 })();
 
-// Function to send email
 const sendEmail = async (to, subject, text, html) => {
   try {
     const trans = await getTransporter();
     const fromEmail = process.env.EMAIL_USER || etherealUser || 'noreply@backend-ledger.local';
-    const info = await trans.sendMail({
-      from: `"Backend-ledger" <${fromEmail}>`,
-      to,
-      subject,
-      text,
-      html,
-    });
-
+    const info = await trans.sendMail({ from: `"Backend-ledger" <${fromEmail}>`, to, subject, text, html });
     console.log('Message sent: %s', info.messageId);
     const previewUrl = nodemailer.getTestMessageUrl(info);
     if (previewUrl) console.log('Preview URL: %s', previewUrl);
@@ -101,7 +61,6 @@ async function sendRegistrationEmail(userEmail, name){
 
     await sendEmail(userEmail, subject, text, html);
 }
-
 
 async function sendTransactionEmail(userEmail, name, amount, toAccount){
     const subject = 'Transaction Successful!';

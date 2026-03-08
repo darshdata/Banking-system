@@ -1,41 +1,56 @@
 require('dotenv').config();
 const nodemailer = require('nodemailer');
 
-const transporter = nodemailer.createTransport({
-  service: 'gmail',
-  auth: {
-    type: 'OAuth2',
-    user: process.env.EMAIL_USER,
-    clientId: process.env.CLIENT_ID,
-    clientSecret: process.env.CLIENT_SECRET,
-    refreshToken: process.env.REFRESH_TOKEN,
-  },
-});
-
-// Verify the connection configuration
-transporter.verify((error, success) => {
-  if (error) {
-    console.error('Error connecting to email server:', error);
-  } else {
-    console.log('Email server is ready to send messages');
+// App Password preferred (no expired tokens). OAuth2 tokens often expire/revoke.
+function createTransporter() {
+  const hasAppPassword = process.env.EMAIL_USER && process.env.EMAIL_APP_PASSWORD;
+  if (hasAppPassword) {
+    return nodemailer.createTransport({
+      service: 'gmail',
+      auth: {
+        user: process.env.EMAIL_USER,
+        pass: process.env.EMAIL_APP_PASSWORD,
+      },
+    });
   }
-});
+  return null;
+}
 
-// Function to send email
+let transporter = createTransporter();
+let etherealUser = null;
+
+async function getTransporter() {
+  if (transporter) return transporter;
+  const testAccount = await nodemailer.createTestAccount();
+  etherealUser = testAccount.user;
+  transporter = nodemailer.createTransport({
+    host: 'smtp.ethereal.email',
+    port: 587,
+    secure: false,
+    auth: { user: testAccount.user, pass: testAccount.pass },
+  });
+  console.log('Email: Using Ethereal (dev). Add EMAIL_USER + EMAIL_APP_PASSWORD for real emails.');
+  return transporter;
+}
+
+(async () => {
+  const trans = await getTransporter();
+  trans.verify((error) => {
+    if (error) console.error('Error connecting to email server:', error.message);
+    else console.log('Email server is ready to send messages');
+  });
+})();
+
 const sendEmail = async (to, subject, text, html) => {
   try {
-    const info = await transporter.sendMail({
-      from: `"Backend-ledger" <${process.env.EMAIL_USER}>`, // sender address
-      to, // list of receivers
-      subject, // Subject line
-      text, // plain text body
-      html, // html body
-    });
-
+    const trans = await getTransporter();
+    const fromEmail = process.env.EMAIL_USER || etherealUser || 'noreply@backend-ledger.local';
+    const info = await trans.sendMail({ from: `"Backend-ledger" <${fromEmail}>`, to, subject, text, html });
     console.log('Message sent: %s', info.messageId);
-    console.log('Preview URL: %s', nodemailer.getTestMessageUrl(info));
+    const previewUrl = nodemailer.getTestMessageUrl(info);
+    if (previewUrl) console.log('Preview URL: %s', previewUrl);
   } catch (error) {
-    console.error('Error sending email:', error);
+    console.error('Error sending email:', error.message);
   }
 };
 
